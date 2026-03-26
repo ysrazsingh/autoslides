@@ -1,0 +1,159 @@
+[
+  {
+    "type": "title",
+    "title": "GitHub Repo Chat",
+    "subtitle": "RAG From Scratch — No LangChain. No Wrappers.",
+    "theme": "dark"
+  },
+  {
+    "type": "two-column",
+    "title": "Cut The Noise First",
+    "left": {
+      "heading": "✕ This is NOT",
+      "points": [
+        "A generic chatbot",
+        "A LangChain playground",
+        "A UI-only project",
+        "An AI wrapper SaaS like Cursor over Kimi K2.5"
+      ]
+    },
+    "right": {
+      "heading": "✓ This IS",
+      "points": [
+        "A system that understands repo structure",
+        "Retrieves actual code and files",
+        "Answers with grounding — not hallucination",
+        "Built layer by layer, fully explained"
+      ]
+    },
+    "theme": "light"
+  },
+  {
+    "type": "content",
+    "title": "System Architecture — 9 Layers",
+    "points": [
+      "Ingestion → Processing → Embedding → Storage",
+      "Retrieval → Generation → API → UI → Infrastructure",
+      "Each layer has one job. Each job is explained.",
+      "You will understand every line — not just copy it."
+    ],
+    "theme": "light"
+  },
+  {
+    "type": "cards",
+    "title": "Ingestion + Processing Layer",
+    "cards": [
+      {
+        "icon": "📥",
+        "title": "Ingestion",
+        "description": "gitingest integration, repo fetching, large repo handling, content normalisation"
+      },
+      {
+        "icon": "⚙️",
+        "title": "Processing",
+        "description": "Chunking strategy, overlap tuning, file-aware segmentation, deduplication"
+      },
+      {
+        "icon": "🔢",
+        "title": "Embedding",
+        "description": "OpenAI embeddings, batching for performance, cost control, retry handling"
+      },
+      {
+        "icon": "🗄️",
+        "title": "Storage",
+        "description": "Chroma persistence, collection per repo, ID strategy, update vs replace"
+      }
+    ],
+    "theme": "light"
+  },
+  {
+    "type": "cards",
+    "title": "Retrieval + Generation + Interface Layer",
+    "cards": [
+      {
+        "icon": "🧠",
+        "title": "Retrieval",
+        "description": "Similarity search, top-k tuning, context assembly, reranking (later)"
+      },
+      {
+        "icon": "✍️",
+        "title": "Generation",
+        "description": "Prompt design, hallucination control, context limits, model choice"
+      },
+      {
+        "icon": "🔌",
+        "title": "API",
+        "description": "/ingest and /chat endpoints, request validation, error handling"
+      },
+      {
+        "icon": "🖥️",
+        "title": "UI + Infra",
+        "description": "Repo input, question input, response display — Dockerised with volume persistence"
+      }
+    ],
+    "theme": "light"
+  },
+  {
+    "type": "stats",
+    "title": "What Actually Decides Quality",
+    "stats": [
+      { "value": "#1", "label": "Chunking quality — bad chunks = irrelevant answers" },
+      { "value": "#2", "label": "Retrieval accuracy — wrong top-5 = confident nonsense" },
+      { "value": "#3", "label": "Context construction — good chunks + bad prompt = bad answer" }
+    ],
+    "theme": "light"
+  },
+  {
+    "type": "three-column",
+    "title": "Why Not LangChain / pgvector?",
+    "columns": [
+      {
+        "heading": "Skip LangChain",
+        "body": "Everything you need — chunking, embedding, storing, retrieving, prompting — you build yourself. LangChain only makes sense for multi-step agents and complex orchestration."
+      },
+      {
+        "heading": "Skip pgvector (for now)",
+        "body": "pgvector is great for multi-user systems and horizontal scaling. Right now you need local embed storage with similarity search. Chroma already does this."
+      },
+      {
+        "heading": "What You ARE Using",
+        "body": "Basic semantic search: text → embedding → vector query → cosine similarity. Simple, fast, and enough to build a real working system."
+      }
+    ],
+    "theme": "light"
+  },
+  {
+    "type": "two-column",
+    "title": "Current Limits vs Next Step",
+    "left": {
+      "heading": "Current Limitations",
+      "points": [
+        "No reranking → results can be noisy",
+        "No hybrid search (keyword + semantic)",
+        "No metadata filtering",
+        "No file-level awareness"
+      ]
+    },
+    "right": {
+      "heading": "Next Step: Hybrid Retrieval",
+      "points": [
+        "Semantic search (embeddings) +",
+        "Keyword match (BM25)",
+        "That's when your system stops being a toy",
+        "We'll cover this in a follow-up video"
+      ]
+    },
+    "theme": "light"
+  },
+  {
+    "type": "quote",
+    "quote": "Bad chunking doesn't just give wrong answers — it gives confidently wrong answers.",
+    "author": "The most underestimated step in every RAG tutorial",
+    "theme": "dark"
+  },
+  {
+    "type": "end",
+    "title": "Let's Build It.",
+    "theme": "dark"
+  }
+]
