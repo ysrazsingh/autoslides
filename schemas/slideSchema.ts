@@ -3,6 +3,41 @@ import { z } from "zod";
 // Shared field
 const theme = z.enum(["light", "dark"]).default("dark");
 
+// ── Typography ───────────────────────────────────────────────────────────────
+// Optional per-slide styling overrides. All fields are optional so existing
+// slides without typography work unchanged. AI can set any subset of fields.
+//
+// Rich text in string fields: **bold**, _italic_, __underline__, `code`
+// These markers are rendered in the web UI and stripped for PPTX export.
+
+export const TypographySchema = z
+  .object({
+    /** CSS font family, e.g. "Georgia", "Inter", "monospace" */
+    fontFamily: z.string().optional(),
+    /** Hex color for headings, e.g. "#6366f1" */
+    headingColor: z.string().optional(),
+    /** Font size in px (web) / pt (PPTX), e.g. 48 */
+    headingSize: z.number().optional(),
+    headingWeight: z
+      .enum(["normal", "medium", "semibold", "bold"])
+      .optional(),
+    headingAlign: z.enum(["left", "center", "right"]).optional(),
+    /** Hex color for body / bullet text */
+    bodyColor: z.string().optional(),
+    /** Font size in px (web) / pt (PPTX) */
+    bodySize: z.number().optional(),
+    bodyAlign: z.enum(["left", "center", "right"]).optional(),
+    /** Hex color for secondary / muted text */
+    mutedColor: z.string().optional(),
+    /** Hex accent color used for borders and highlights */
+    accentColor: z.string().optional(),
+    /** Line-height multiplier, e.g. 1.6 */
+    lineHeight: z.number().optional(),
+  })
+  .optional();
+
+export type Typography = z.infer<typeof TypographySchema>;
+
 // ── Slide schemas ────────────────────────────────────────────────────────────
 
 export const TitleSlideSchema = z.object({
@@ -10,6 +45,7 @@ export const TitleSlideSchema = z.object({
   title: z.string(),
   subtitle: z.string().optional(),
   theme,
+  typography: TypographySchema,
 });
 
 export const ContentSlideSchema = z.object({
@@ -17,12 +53,14 @@ export const ContentSlideSchema = z.object({
   title: z.string(),
   points: z.array(z.string()).min(1),
   theme,
+  typography: TypographySchema,
 });
 
 export const EndSlideSchema = z.object({
   type: z.literal("end"),
   title: z.string(),
   theme,
+  typography: TypographySchema,
 });
 
 export const ImageSlideSchema = z.object({
@@ -31,6 +69,7 @@ export const ImageSlideSchema = z.object({
   imageUrl: z.string(),
   caption: z.string().optional(),
   theme,
+  typography: TypographySchema,
 });
 
 const columnSchema = z.object({
@@ -44,6 +83,7 @@ export const TwoColumnSlideSchema = z.object({
   left: columnSchema,
   right: columnSchema,
   theme,
+  typography: TypographySchema,
 });
 
 export const ThreeColumnSlideSchema = z.object({
@@ -53,6 +93,7 @@ export const ThreeColumnSlideSchema = z.object({
     .array(z.object({ heading: z.string(), body: z.string() }))
     .length(3),
   theme,
+  typography: TypographySchema,
 });
 
 export const CardsSlideSchema = z.object({
@@ -69,6 +110,7 @@ export const CardsSlideSchema = z.object({
     .min(2)
     .max(6),
   theme,
+  typography: TypographySchema,
 });
 
 export const QuoteSlideSchema = z.object({
@@ -76,6 +118,7 @@ export const QuoteSlideSchema = z.object({
   quote: z.string(),
   author: z.string().optional(),
   theme,
+  typography: TypographySchema,
 });
 
 export const StatsSlideSchema = z.object({
@@ -86,6 +129,7 @@ export const StatsSlideSchema = z.object({
     .min(2)
     .max(4),
   theme,
+  typography: TypographySchema,
 });
 
 // ── Discriminated union ──────────────────────────────────────────────────────

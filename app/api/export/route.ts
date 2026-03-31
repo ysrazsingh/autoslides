@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import PptxGenJS from "pptxgenjs";
-import { SlidesSchema, type Slide } from "@/schemas/slideSchema";
+import { SlidesSchema, type Slide, type Typography } from "@/schemas/slideSchema";
 import rawSlides from "@/data/slides.json";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -29,64 +29,123 @@ function colors(theme: "light" | "dark") {
   };
 }
 
+/** Strip leading # from hex color for pptxgenjs (which wants "FF0000" not "#FF0000") */
+function hex(color: string): string {
+  return color.replace(/^#/, "");
+}
+
+/**
+ * Resolve colors for a slide, overlaying typography overrides on theme defaults.
+ * Returns { bg, heading, body, muted, border, cardBg, fontFace } ready for pptxgenjs.
+ */
+function resolveColors(theme: "light" | "dark", typography: Typography) {
+  const base = colors(theme);
+  const weightPt: Record<string, boolean> = {
+    bold: true,
+    semibold: true,
+    medium: false,
+    normal: false,
+  };
+  return {
+    bg: base.bg,
+    heading: typography?.headingColor ? hex(typography.headingColor) : base.text,
+    body: typography?.bodyColor ? hex(typography.bodyColor) : base.text,
+    muted: typography?.mutedColor ? hex(typography.mutedColor) : base.muted,
+    border: typography?.accentColor ? hex(typography.accentColor) : base.border,
+    cardBg: base.cardBg,
+    fontFace: typography?.fontFamily ?? undefined,
+    headingSize: typography?.headingSize ?? undefined,
+    bodySize: typography?.bodySize ?? undefined,
+    headingBold: typography?.headingWeight
+      ? weightPt[typography.headingWeight] ?? false
+      : undefined,
+    headingAlign: typography?.headingAlign as "left" | "center" | "right" | undefined,
+    bodyAlign: typography?.bodyAlign as "left" | "center" | "right" | undefined,
+  };
+}
+
+/** Strip markdown markers from a string for clean PPTX plain text */
+function stripMd(s: string): string {
+  return s
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/`(.+?)`/g, "$1");
+}
+
 // ── Slide renderers ───────────────────────────────────────────────────────────
 
 function addTitleSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "title" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
 
-  s.addText(slide.title, {
+  s.addText(stripMd(slide.title), {
     x: MARGIN, y: 2.5, w: CONTENT_W, h: 1.6,
-    fontSize: 48, bold: true, color: c.text, align: "center",
+    fontSize: c.headingSize ?? 48,
+    bold: c.headingBold ?? true,
+    color: c.heading,
+    align: c.headingAlign ?? "center",
+    ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
   if (slide.subtitle) {
-    s.addText(slide.subtitle, {
+    s.addText(stripMd(slide.subtitle), {
       x: MARGIN, y: 4.3, w: CONTENT_W, h: 0.8,
-      fontSize: 24, color: c.muted, align: "center",
+      fontSize: c.bodySize ?? 24,
+      color: c.muted,
+      align: c.bodyAlign ?? "center",
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
   }
 }
 
 function addContentSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "content" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
 
-  s.addText(slide.title, {
+  s.addText(stripMd(slide.title), {
     x: MARGIN, y: 0.5, w: CONTENT_W, h: 1.0,
-    fontSize: 36, bold: true, color: c.text,
+    fontSize: c.headingSize ?? 36,
+    bold: c.headingBold ?? true,
+    color: c.heading,
+    align: c.headingAlign,
+    ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
-  // Horizontal rule
   s.addShape(pptx.ShapeType.rect, {
     x: MARGIN, y: 1.65, w: CONTENT_W, h: 0.02, fill: { color: c.border },
   });
 
   const bulletItems = slide.points.map((p) => ({
-    text: p,
-    options: { bullet: { type: "bullet" as const }, fontSize: 22, color: c.text, breakLine: true, paraSpaceAfter: 8 },
+    text: stripMd(p),
+    options: {
+      bullet: { type: "bullet" as const },
+      fontSize: c.bodySize ?? 22,
+      color: c.body,
+      breakLine: true,
+      paraSpaceAfter: 8,
+      align: c.bodyAlign,
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
+    },
   }));
 
-  s.addText(bulletItems, {
-    x: MARGIN, y: 1.9, w: CONTENT_W, h: 5.0,
-    valign: "top",
-  });
+  s.addText(bulletItems, { x: MARGIN, y: 1.9, w: CONTENT_W, h: 5.0, valign: "top" });
 }
 
 function addTwoColumnSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "two-column" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
   const colW = (CONTENT_W - 0.4) / 2;
 
-  s.addText(slide.title, {
+  s.addText(stripMd(slide.title), {
     x: MARGIN, y: 0.5, w: CONTENT_W, h: 1.0,
-    fontSize: 36, bold: true, color: c.text,
+    fontSize: c.headingSize ?? 36, bold: c.headingBold ?? true, color: c.heading,
+    align: c.headingAlign, ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
-  // Vertical divider
   s.addShape(pptx.ShapeType.rect, {
     x: MARGIN + colW + 0.2, y: 1.8, w: 0.02, h: 5.2, fill: { color: c.border },
   });
@@ -97,14 +156,23 @@ function addTwoColumnSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "two-c
   ] as const) {
     const x = MARGIN + xOffset;
     if (col.heading) {
-      s.addText(col.heading, {
+      s.addText(stripMd(col.heading), {
         x, y: 1.8, w: colW, h: 0.7,
-        fontSize: 20, bold: true, color: c.text,
+        fontSize: c.bodySize ?? 20, bold: true, color: c.body,
+        ...(c.fontFace ? { fontFace: c.fontFace } : {}),
       });
     }
     const items = col.points.map((p) => ({
-      text: p,
-      options: { bullet: { type: "bullet" as const }, fontSize: 19, color: c.text, breakLine: true, paraSpaceAfter: 6 },
+      text: stripMd(p),
+      options: {
+        bullet: { type: "bullet" as const },
+        fontSize: c.bodySize ?? 19,
+        color: c.body,
+        breakLine: true,
+        paraSpaceAfter: 6,
+        align: c.bodyAlign,
+        ...(c.fontFace ? { fontFace: c.fontFace } : {}),
+      },
     }));
     s.addText(items, { x, y: col.heading ? 2.6 : 1.9, w: colW, h: 4.5, valign: "top" });
   }
@@ -112,39 +180,45 @@ function addTwoColumnSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "two-c
 
 function addThreeColumnSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "three-column" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
   const colW = (CONTENT_W - 0.4) / 3;
 
-  s.addText(slide.title, {
+  s.addText(stripMd(slide.title), {
     x: MARGIN, y: 0.5, w: CONTENT_W, h: 1.0,
-    fontSize: 36, bold: true, color: c.text,
+    fontSize: c.headingSize ?? 36, bold: c.headingBold ?? true, color: c.heading,
+    align: c.headingAlign, ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
   slide.columns.forEach((col, i) => {
     const x = MARGIN + i * (colW + 0.2);
-    s.addText(col.heading, {
+    s.addText(stripMd(col.heading), {
       x, y: 1.8, w: colW, h: 0.7,
-      fontSize: 20, bold: true, color: c.text,
+      fontSize: c.bodySize ?? 20, bold: true, color: c.body,
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
     s.addShape(pptx.ShapeType.rect, {
       x, y: 2.55, w: colW, h: 0.02, fill: { color: c.border },
     });
-    s.addText(col.body, {
+    s.addText(stripMd(col.body), {
       x, y: 2.7, w: colW, h: 4.4,
-      fontSize: 17, color: c.muted, valign: "top", wrap: true,
+      fontSize: c.bodySize ? c.bodySize - 3 : 17,
+      color: c.muted, valign: "top", wrap: true,
+      align: c.bodyAlign,
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
   });
 }
 
 function addCardsSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "cards" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
 
-  s.addText(slide.title, {
+  s.addText(stripMd(slide.title), {
     x: MARGIN, y: 0.5, w: CONTENT_W, h: 1.0,
-    fontSize: 36, bold: true, color: c.text,
+    fontSize: c.headingSize ?? 36, bold: c.headingBold ?? true, color: c.heading,
+    align: c.headingAlign, ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
   const count = slide.cards.length;
@@ -172,25 +246,28 @@ function addCardsSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "cards" }>
       s.addText(card.icon, { x: x + 0.2, y: textY, w: 0.6, h: 0.5, fontSize: 20 });
       textY += 0.55;
     }
-    s.addText(card.title, {
+    s.addText(stripMd(card.title), {
       x: x + 0.2, y: textY, w: cardW - 0.4, h: 0.5,
-      fontSize: 17, bold: true, color: c.text,
+      fontSize: c.bodySize ?? 17, bold: true, color: c.body,
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
-    s.addText(card.description, {
+    s.addText(stripMd(card.description), {
       x: x + 0.2, y: textY + 0.55, w: cardW - 0.4, h: cardH - (card.icon ? 1.5 : 0.95),
-      fontSize: 14, color: c.muted, wrap: true, valign: "top",
+      fontSize: c.bodySize ? c.bodySize - 3 : 14, color: c.muted, wrap: true, valign: "top",
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
   });
 }
 
 function addStatsSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "stats" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
 
-  s.addText(slide.title, {
+  s.addText(stripMd(slide.title), {
     x: MARGIN, y: 0.5, w: CONTENT_W, h: 1.0,
-    fontSize: 36, bold: true, color: c.text,
+    fontSize: c.headingSize ?? 36, bold: c.headingBold ?? true, color: c.heading,
+    align: c.headingAlign, ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
   const count = slide.stats.length;
@@ -204,48 +281,56 @@ function addStatsSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "stats" }>
       line: { color: c.border, width: 1 },
       rectRadius: 0.15,
     });
-    s.addText(stat.value, {
+    s.addText(stripMd(stat.value), {
       x, y: 2.6, w: boxW, h: 1.6,
-      fontSize: 52, bold: true, color: c.text, align: "center",
+      fontSize: c.headingSize ?? 52, bold: c.headingBold ?? true,
+      color: c.heading, align: "center",
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
-    s.addText(stat.label, {
+    s.addText(stripMd(stat.label), {
       x: x + 0.2, y: 4.3, w: boxW - 0.4, h: 1.2,
-      fontSize: 16, color: c.muted, align: "center", wrap: true,
+      fontSize: c.bodySize ?? 16, color: c.muted, align: "center", wrap: true,
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
   });
 }
 
 function addQuoteSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "quote" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
 
   s.addText("\u201C", {
     x: MARGIN, y: 0.5, w: 1.2, h: 1.5,
     fontSize: 96, color: c.muted, bold: true,
+    ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
-  s.addText(slide.quote, {
+  s.addText(stripMd(slide.quote), {
     x: MARGIN, y: 1.6, w: CONTENT_W, h: 4.0,
-    fontSize: 28, color: c.text, italic: true, align: "center", wrap: true, valign: "middle",
+    fontSize: c.bodySize ?? 28, color: c.body, italic: true,
+    align: "center", wrap: true, valign: "middle",
+    ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
   if (slide.author) {
-    s.addText(`\u2014 ${slide.author}`, {
+    s.addText(`\u2014 ${stripMd(slide.author)}`, {
       x: MARGIN, y: 5.9, w: CONTENT_W, h: 0.6,
-      fontSize: 18, color: c.muted, align: "center",
+      fontSize: c.bodySize ? c.bodySize - 10 : 18, color: c.muted, align: "center",
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
   }
 }
 
 async function addImageSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "image" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
 
-  s.addText(slide.title, {
+  s.addText(stripMd(slide.title), {
     x: MARGIN, y: 0.4, w: CONTENT_W, h: 0.9,
-    fontSize: 30, bold: true, color: c.text,
+    fontSize: c.headingSize ?? 30, bold: c.headingBold ?? true, color: c.heading,
+    align: c.headingAlign, ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
 
   try {
@@ -268,24 +353,27 @@ async function addImageSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "ima
   }
 
   if (slide.caption) {
-    s.addText(slide.caption, {
+    s.addText(stripMd(slide.caption), {
       x: MARGIN, y: 6.7, w: CONTENT_W, h: 0.5,
-      fontSize: 14, color: c.muted, align: "center",
+      fontSize: c.bodySize ? c.bodySize - 8 : 14, color: c.muted, align: "center",
+      ...(c.fontFace ? { fontFace: c.fontFace } : {}),
     });
   }
 }
 
 function addEndSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "end" }>) {
   const s = pptx.addSlide();
-  const c = colors(slide.theme);
+  const c = resolveColors(slide.theme, slide.typography);
   s.background = { color: c.bg };
 
   s.addShape(pptx.ShapeType.rect, {
     x: W / 2 - 0.5, y: 3.0, w: 1.0, h: 0.04, fill: { color: c.muted },
   });
-  s.addText(slide.title, {
+  s.addText(stripMd(slide.title), {
     x: MARGIN, y: 3.15, w: CONTENT_W, h: 1.4,
-    fontSize: 52, bold: true, color: c.text, align: "center",
+    fontSize: c.headingSize ?? 52, bold: c.headingBold ?? true, color: c.heading,
+    align: c.headingAlign ?? "center",
+    ...(c.fontFace ? { fontFace: c.fontFace } : {}),
   });
   s.addShape(pptx.ShapeType.rect, {
     x: W / 2 - 0.5, y: 4.6, w: 1.0, h: 0.04, fill: { color: c.muted },

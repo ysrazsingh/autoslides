@@ -28,7 +28,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SlidesSchema, SlideSchema, type Slide } from "@/schemas/slideSchema";
+import { SlidesSchema, SlideSchema, TypographySchema, type Slide } from "@/schemas/slideSchema";
 
 // ── Storage helpers ───────────────────────────────────────────────────────────
 
@@ -180,9 +180,41 @@ function createMCPServer(): Server {
         },
       },
       {
+        name: "set_typography",
+        description:
+          "Apply typography settings to slides. Pass page=0 (or omit) to apply to ALL slides at once; pass page=N (1-based) to update a single slide only. Typography controls font family, heading/body/muted/accent colors, sizes, weight, alignment, and line height. Supports rich text markers in string fields: **bold**, _italic_, __underline__, `code`.",
+        inputSchema: {
+          type: "object",
+          required: ["typography"],
+          properties: {
+            page: {
+              type: "number",
+              description: "0 or omitted = all slides. 1-based page number = that slide only.",
+            },
+            typography: {
+              type: "object",
+              description: "Typography overrides. All fields optional.",
+              properties: {
+                fontFamily: { type: "string", description: "CSS font family e.g. 'Georgia', 'Inter'" },
+                headingColor: { type: "string", description: "Hex color e.g. '#6366f1'" },
+                headingSize: { type: "number", description: "px (web) / pt (PPTX), e.g. 48" },
+                headingWeight: { type: "string", enum: ["normal", "medium", "semibold", "bold"] },
+                headingAlign: { type: "string", enum: ["left", "center", "right"] },
+                bodyColor: { type: "string", description: "Hex color for body text" },
+                bodySize: { type: "number", description: "px (web) / pt (PPTX)" },
+                bodyAlign: { type: "string", enum: ["left", "center", "right"] },
+                mutedColor: { type: "string", description: "Hex color for secondary/muted text" },
+                accentColor: { type: "string", description: "Hex color for borders and highlights" },
+                lineHeight: { type: "number", description: "Multiplier e.g. 1.6" },
+              },
+            },
+          },
+        },
+      },
+      {
         name: "list_slide_types",
         description:
-          "Describe all available slide types and their required/optional fields.",
+          "Describe all available slide types, typography options, and rich text markers.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
@@ -316,9 +348,54 @@ function createMCPServer(): Server {
           };
         }
 
+        // ── set_typography ──────────────────────────────────────────────────
+        case "set_typography": {
+          const slides = readSlides();
+          const typography = TypographySchema.parse(args.typography ?? {});
+          const page = args.page !== undefined ? Number(args.page) : 0;
+
+          if (page === 0) {
+            const updated = slides.map((slide) => ({ ...slide, typography }));
+            const result = applyWrite(SlidesSchema.parse(updated));
+            const msg = result.persisted
+              ? `Applied typography to all ${slides.length} slides.`
+              : `Computed typography update for all ${slides.length} slides. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(SlidesSchema.parse(updated), null, 2)}`;
+            return { content: [{ type: "text", text: msg }] };
+          } else {
+            if (!Number.isInteger(page) || page < 1 || page > slides.length) {
+              throw new Error(`page must be 0 (all) or 1–${slides.length}`);
+            }
+            const idx = page - 1;
+            const updated = slides.map((slide, i) =>
+              i === idx ? { ...slide, typography } : slide
+            );
+            const result = applyWrite(SlidesSchema.parse(updated));
+            const msg = result.persisted
+              ? `Applied typography to slide ${page} (${slides[idx].type}).`
+              : `Computed typography update for slide ${page}. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(SlidesSchema.parse(updated), null, 2)}`;
+            return { content: [{ type: "text", text: msg }] };
+          }
+        }
+
         // ── list_slide_types ────────────────────────────────────────────────
         case "list_slide_types": {
           const description = `All slide types share: "theme": "light" | "dark" (defaults to "dark").
+
+Optional typography object (per slide — use set_typography to apply):
+  fontFamily    string           CSS font family e.g. "Georgia", "Inter"
+  headingColor  string           Hex color e.g. "#6366f1"
+  headingSize   number           px (web) / pt (PPTX export), e.g. 48
+  headingWeight "normal"|"medium"|"semibold"|"bold"
+  headingAlign  "left"|"center"|"right"
+  bodyColor     string           Hex color for body/bullet text
+  bodySize      number           px / pt
+  bodyAlign     "left"|"center"|"right"
+  mutedColor    string           Hex color for secondary text
+  accentColor   string           Hex color for borders/highlights
+  lineHeight    number           Multiplier e.g. 1.6
+
+Rich text markers (in any string field):
+  **bold**  _italic_  __underline__  \`code\`
 
 title
   Required: title (string)
