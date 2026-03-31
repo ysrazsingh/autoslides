@@ -1,0 +1,358 @@
+/**
+ * AutoSlides HTTP MCP Endpoint
+ *
+ * Implements the MCP Streamable HTTP transport so Claude Code can connect
+ * to the deployed Vercel app at https://<your-app>.vercel.app/api/mcp
+ *
+ * Authentication
+ * ──────────────
+ * Set MCP_SECRET in Vercel env vars. Claude Code then sends:
+ *   Authorization: Bearer <MCP_SECRET>
+ *
+ * Storage notes
+ * ─────────────
+ * Vercel's filesystem is read-only at runtime. Write tools (set_slides,
+ * add_slide, update_slide, delete_slide) return the modified slide array
+ * as JSON content instead of persisting it. Copy the result back to
+ * data/slides.json and redeploy, or set up Vercel Blob/KV for live writes.
+ *
+ * In local dev (no VERCEL env var) write tools write to disk as normal.
+ */
+
+import { NextRequest } from "next/server";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { SlidesSchema, SlideSchema, type Slide } from "@/schemas/slideSchema";
+
+// ── Storage helpers ───────────────────────────────────────────────────────────
+
+const SLIDES_PATH = join(process.cwd(), "data/slides.json");
+const IS_VERCEL = !!process.env.VERCEL;
+
+function readSlides(): Slide[] {
+  const raw = JSON.parse(readFileSync(SLIDES_PATH, "utf-8"));
+  return SlidesSchema.parse(raw);
+}
+
+function writeSlides(slides: Slide[]): void {
+  SlidesSchema.parse(slides);
+  writeFileSync(SLIDES_PATH, JSON.stringify(slides, null, 2) + "\n");
+}
+
+/** On Vercel the filesystem is read-only. Return the result instead of writing. */
+function applyWrite(
+  slides: Slide[]
+): { persisted: true } | { persisted: false; slides: Slide[] } {
+  if (IS_VERCEL) {
+    return { persisted: false, slides };
+  }
+  writeSlides(slides);
+  return { persisted: true };
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+function checkAuth(req: NextRequest): Response | null {
+  const secret = process.env.MCP_SECRET;
+  if (!secret) return null; // no secret configured — open access (local dev)
+
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${secret}`) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  return null;
+}
+
+// ── MCP server factory ────────────────────────────────────────────────────────
+
+function createMCPServer(): Server {
+  const server = new Server(
+    { name: "autoslides", version: "0.1.0" },
+    { capabilities: { tools: {} } }
+  );
+
+  // ── Tool list ───────────────────────────────────────────────────────────────
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: "get_slides",
+        description: "Read all slides from the current presentation.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "set_slides",
+        description: IS_VERCEL
+          ? "Compute a new slide array (Zod-validated). On Vercel the result is returned as JSON — copy it to data/slides.json and redeploy to persist."
+          : "Replace ALL slides in data/slides.json. Zod-validated before writing.",
+        inputSchema: {
+          type: "object",
+          required: ["slides"],
+          properties: {
+            slides: {
+              type: "array",
+              description: "Array of slide objects.",
+            },
+          },
+        },
+      },
+      {
+        name: "add_slide",
+        description: IS_VERCEL
+          ? "Insert a slide and return the updated array. On Vercel copy the result to data/slides.json and redeploy to persist."
+          : "Insert a slide at a specific position (0-based). Omit index to append.",
+        inputSchema: {
+          type: "object",
+          required: ["slide"],
+          properties: {
+            slide: { type: "object" },
+            index: {
+              type: "number",
+              description: "0-based insert position. Appends if omitted.",
+            },
+          },
+        },
+      },
+      {
+        name: "update_slide",
+        description: IS_VERCEL
+          ? "Overwrite a slide and return the updated array. On Vercel copy the result to data/slides.json and redeploy to persist."
+          : "Overwrite a single slide at a specific 0-based index.",
+        inputSchema: {
+          type: "object",
+          required: ["index", "slide"],
+          properties: {
+            index: { type: "number" },
+            slide: { type: "object" },
+          },
+        },
+      },
+      {
+        name: "delete_slide",
+        description: IS_VERCEL
+          ? "Remove a slide and return the updated array. On Vercel copy the result to data/slides.json and redeploy to persist."
+          : "Remove the slide at a specific 0-based index.",
+        inputSchema: {
+          type: "object",
+          required: ["index"],
+          properties: {
+            index: { type: "number" },
+          },
+        },
+      },
+      {
+        name: "generate_slides",
+        description:
+          "Generate a full presentation from a topic using AI (OpenAI). Returns the slide array. On Vercel, use set_slides afterwards to persist.",
+        inputSchema: {
+          type: "object",
+          required: ["topic"],
+          properties: {
+            topic: {
+              type: "string",
+              description: "Topic to generate slides about (max 200 chars).",
+            },
+          },
+        },
+      },
+      {
+        name: "list_slide_types",
+        description:
+          "Describe all available slide types and their required/optional fields.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+  }));
+
+  // ── Tool handlers ───────────────────────────────────────────────────────────
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const { name, arguments: args = {} } = req.params;
+
+    try {
+      switch (name) {
+        // ── get_slides ──────────────────────────────────────────────────────
+        case "get_slides": {
+          const slides = readSlides();
+          return {
+            content: [{ type: "text", text: JSON.stringify(slides, null, 2) }],
+          };
+        }
+
+        // ── set_slides ──────────────────────────────────────────────────────
+        case "set_slides": {
+          if (!Array.isArray(args.slides)) throw new Error('"slides" must be an array');
+          const slides = SlidesSchema.parse(args.slides);
+          const result = applyWrite(slides);
+          const msg = result.persisted
+            ? `Wrote ${slides.length} slides to data/slides.json.`
+            : `Computed ${slides.length} slides. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
+          return { content: [{ type: "text", text: msg }] };
+        }
+
+        // ── add_slide ───────────────────────────────────────────────────────
+        case "add_slide": {
+          const slides = readSlides();
+          const slide = SlideSchema.parse(args.slide);
+          const idx =
+            args.index !== undefined && args.index !== null
+              ? Number(args.index)
+              : slides.length;
+          if (idx < 0 || idx > slides.length)
+            throw new Error(`index ${idx} out of range (0–${slides.length})`);
+          slides.splice(idx, 0, slide);
+          const result = applyWrite(slides);
+          const msg = result.persisted
+            ? `Inserted slide at index ${idx}. Total: ${slides.length} slides.`
+            : `Computed insert at index ${idx}. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
+          return { content: [{ type: "text", text: msg }] };
+        }
+
+        // ── update_slide ────────────────────────────────────────────────────
+        case "update_slide": {
+          const slides = readSlides();
+          const idx = Number(args.index);
+          if (idx < 0 || idx >= slides.length)
+            throw new Error(`index ${idx} out of range (0–${slides.length - 1})`);
+          slides[idx] = SlideSchema.parse(args.slide);
+          const result = applyWrite(slides);
+          const msg = result.persisted
+            ? `Updated slide at index ${idx}.`
+            : `Computed update at index ${idx}. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
+          return { content: [{ type: "text", text: msg }] };
+        }
+
+        // ── delete_slide ────────────────────────────────────────────────────
+        case "delete_slide": {
+          const slides = readSlides();
+          const idx = Number(args.index);
+          if (idx < 0 || idx >= slides.length)
+            throw new Error(`index ${idx} out of range (0–${slides.length - 1})`);
+          const [removed] = slides.splice(idx, 1);
+          const result = applyWrite(slides);
+          const msg = result.persisted
+            ? `Deleted slide at index ${idx} (type: "${removed.type}"). Total: ${slides.length} slides.`
+            : `Computed delete at index ${idx} (type: "${removed.type}"). Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
+          return { content: [{ type: "text", text: msg }] };
+        }
+
+        // ── generate_slides ─────────────────────────────────────────────────
+        case "generate_slides": {
+          const topic =
+            typeof args.topic === "string" ? args.topic.trim() : "";
+          if (!topic) throw new Error('"topic" is required');
+          if (topic.length > 200)
+            throw new Error('"topic" must be 200 characters or fewer');
+
+          const base =
+            process.env.NEXT_PUBLIC_APP_URL ??
+            (IS_VERCEL
+              ? `https://${process.env.VERCEL_URL}`
+              : "http://localhost:3000");
+
+          const res = await fetch(`${base}/api/generate`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ topic }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: res.statusText }));
+            throw new Error(`/api/generate failed (${res.status}): ${err.error ?? res.statusText}`);
+          }
+
+          const slides: Slide[] = await res.json();
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Generated ${slides.length} slides for "${topic}".\nUse set_slides to apply them.\n\n${JSON.stringify(slides, null, 2)}`,
+              },
+            ],
+          };
+        }
+
+        // ── list_slide_types ────────────────────────────────────────────────
+        case "list_slide_types": {
+          const description = `All slide types share: "theme": "light" | "dark" (defaults to "dark").
+
+title
+  Required: title (string)
+  Optional: subtitle (string)
+
+content
+  Required: title (string), points (string[], 1–6 items)
+
+two-column
+  Required: title (string)
+            left  { heading?: string, points: string[] }
+            right { heading?: string, points: string[] }
+
+three-column
+  Required: title (string)
+            columns — exactly 3 objects: { heading: string, body: string }
+
+cards
+  Required: title (string)
+            cards — 2–6 objects: { title: string, description: string, icon?: string }
+
+stats
+  Required: title (string)
+            stats — 2–4 objects: { value: string, label: string }
+
+quote
+  Required: quote (string)
+  Optional: author (string)
+
+image
+  Required: title (string), imageUrl (string)
+  Optional: caption (string)
+
+end
+  Required: title (string)`;
+          return { content: [{ type: "text", text: description }] };
+        }
+
+        default:
+          throw new Error(`Unknown tool: ${name}`);
+      }
+    } catch (err) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: String(err) }],
+      };
+    }
+  });
+
+  return server;
+}
+
+// ── Route handler ─────────────────────────────────────────────────────────────
+
+async function handler(req: NextRequest): Promise<Response> {
+  const authError = checkAuth(req);
+  if (authError) return authError;
+
+  const server = createMCPServer();
+
+  // Stateless mode: sessionIdGenerator = undefined
+  // Each serverless invocation is independent — no in-memory session state.
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+
+  await server.connect(transport);
+  return transport.handleRequest(req);
+}
+
+export { handler as GET, handler as POST, handler as DELETE };

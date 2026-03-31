@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "autoslides": {
+      "command": "npx",
+      "args": ["tsx", "mcp-server.ts"]
+    }
+  }
+}
