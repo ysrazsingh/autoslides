@@ -173,21 +173,6 @@ function createMCPServer(): Server {
         },
       },
       {
-        name: "generate_slides",
-        description:
-          "Generate a full presentation from a topic using AI (OpenAI). Returns the slide array. On Vercel, use set_slides afterwards to persist.",
-        inputSchema: {
-          type: "object",
-          required: ["topic"],
-          properties: {
-            topic: {
-              type: "string",
-              description: "Topic to generate slides about (max 200 chars).",
-            },
-          },
-        },
-      },
-      {
         name: "set_typography",
         description:
           "Apply typography settings to slides. Pass page=0 (or omit) to apply to ALL slides at once; pass page=N (1-based) to update a single slide only. Typography controls font family, heading/body/muted/accent colors, sizes, weight, alignment, and line height. Supports rich text markers in string fields: **bold**, _italic_, __underline__, `code`.",
@@ -318,42 +303,6 @@ function createMCPServer(): Server {
             ? `Deleted slide at index ${idx} (type: "${removed.type}"). Total: ${slides.length} slides.`
             : `Computed delete at index ${idx} (type: "${removed.type}"). Filesystem is read-only on Vercel — copy the JSON below to data/mcp-slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
           return { content: [{ type: "text", text: msg }] };
-        }
-
-        // ── generate_slides ─────────────────────────────────────────────────
-        case "generate_slides": {
-          const topic =
-            typeof args.topic === "string" ? args.topic.trim() : "";
-          if (!topic) throw new Error('"topic" is required');
-          if (topic.length > 200)
-            throw new Error('"topic" must be 200 characters or fewer');
-
-          const base =
-            process.env.NEXT_PUBLIC_APP_URL ??
-            (IS_VERCEL
-              ? `https://${process.env.VERCEL_URL}`
-              : "http://localhost:3000");
-
-          const res = await fetch(`${base}/api/generate`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ topic }),
-          });
-
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: res.statusText }));
-            throw new Error(`/api/generate failed (${res.status}): ${err.error ?? res.statusText}`);
-          }
-
-          const slides: Slide[] = await res.json();
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Generated ${slides.length} slides for "${topic}".\nUse set_slides to apply them.\n\n${JSON.stringify(slides, null, 2)}`,
-              },
-            ],
-          };
         }
 
         // ── set_typography ──────────────────────────────────────────────────

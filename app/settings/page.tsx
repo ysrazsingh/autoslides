@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SlidesSchema, type Slide } from "@/schemas/slideSchema";
+import { SETTINGS_KEY, type DeckSource } from "@/lib/autoslidesSettings";
 
 type Provider = "anthropic" | "openai";
 
@@ -10,9 +11,8 @@ interface Settings {
   provider: Provider;
   anthropicKey: string;
   openaiKey: string;
+  deckSource: DeckSource;
 }
-
-const STORAGE_KEY = "autoslides_settings";
 const GENERATED_KEY = "autoslides_generated";
 
 function loadStoredSlides(): Slide[] | null {
@@ -28,17 +28,25 @@ function loadStoredSlides(): Slide[] | null {
 
 function loadSettings(): Settings {
   if (typeof window === "undefined") {
-    return { provider: "anthropic", anthropicKey: "", openaiKey: "" };
+    return { provider: "anthropic", anthropicKey: "", openaiKey: "", deckSource: "web" };
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { provider: "anthropic", anthropicKey: "", openaiKey: "", ...JSON.parse(raw) };
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) {
+      const o = JSON.parse(raw) as Partial<Settings>;
+      return {
+        provider: o.provider === "openai" ? "openai" : "anthropic",
+        anthropicKey: o.anthropicKey ?? "",
+        openaiKey: o.openaiKey ?? "",
+        deckSource: o.deckSource === "mcp" ? "mcp" : "web",
+      };
+    }
   } catch {}
-  return { provider: "anthropic", anthropicKey: "", openaiKey: "" };
+  return { provider: "anthropic", anthropicKey: "", openaiKey: "", deckSource: "web" };
 }
 
 function saveSettings(s: Settings) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 }
 
 export function getActiveSettings(): Settings {
@@ -51,6 +59,7 @@ export default function SettingsPage() {
     provider: "anthropic",
     anthropicKey: "",
     openaiKey: "",
+    deckSource: "web",
   });
   const [topic, setTopic] = useState("");
   const [status, setStatus] = useState<
@@ -68,6 +77,8 @@ export default function SettingsPage() {
   }
 
   async function handleGenerate() {
+    if (settings.deckSource === "mcp") return;
+
     const apiKey =
       settings.provider === "anthropic" ? settings.anthropicKey : settings.openaiKey;
 
@@ -105,6 +116,8 @@ export default function SettingsPage() {
   }
 
   async function handleUpdateExisting() {
+    if (settings.deckSource === "mcp") return;
+
     const apiKey =
       settings.provider === "anthropic" ? settings.anthropicKey : settings.openaiKey;
 
@@ -149,6 +162,7 @@ export default function SettingsPage() {
 
   const activeKey =
     settings.provider === "anthropic" ? settings.anthropicKey : settings.openaiKey;
+  const isWeb = settings.deckSource === "web";
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
@@ -166,146 +180,209 @@ export default function SettingsPage() {
 
       <main className="flex-1 px-8 py-10 max-w-xl mx-auto w-full space-y-10">
 
-        {/* ── AI Provider ──────────────────────────────────────────────── */}
+        {/* ── Deck editing mode ─────────────────────────────────────────── */}
         <section className="space-y-4">
           <h2 className="text-xs font-semibold uppercase tracking-widest opacity-40">
-            AI Provider
+            Deck editing
           </h2>
-
-          <div className="grid grid-cols-2 gap-3">
-            {(["anthropic", "openai"] as Provider[]).map((p) => (
+          <p className="text-xs opacity-35 leading-relaxed">
+            <span className="opacity-60">Web</span> uses this app’s APIs (
+            <code className="opacity-50">/api/generate</code>,{" "}
+            <code className="opacity-50">/api/chat-update</code>) from the browser.{" "}
+            <span className="opacity-60">Claude Code (MCP)</span> means you edit slides only via
+            MCP tools—no extra model calls from this site; Claude composes slides and uses tools
+            like <code className="opacity-50">set_slides</code>.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {(["web", "mcp"] as DeckSource[]).map((mode) => (
               <button
-                key={p}
-                onClick={() => setSettings((s) => ({ ...s, provider: p }))}
+                key={mode}
+                type="button"
+                onClick={() => setSettings((s) => ({ ...s, deckSource: mode }))}
                 className={`relative rounded-lg border px-5 py-4 text-left transition-all ${
-                  settings.provider === p
+                  settings.deckSource === mode
                     ? "border-white/60 bg-white/5"
                     : "border-white/10 hover:border-white/25"
                 }`}
               >
-                {settings.provider === p && (
-                  <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-white" />
+                {settings.deckSource === mode && (
+                  <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-white" />
                 )}
-                <p className="font-medium text-sm">
-                  {p === "anthropic" ? "Claude" : "OpenAI"}
+                <p className="text-sm font-medium">
+                  {mode === "web" ? "Web (API)" : "Claude Code (MCP)"}
                 </p>
-                <p className="text-xs opacity-40 mt-0.5">
-                  {p === "anthropic" ? "Anthropic · claude-sonnet-4-6" : "OpenAI · gpt-4.1-mini"}
+                <p className="mt-0.5 text-xs opacity-40">
+                  {mode === "web"
+                    ? "Generate & chat here"
+                    : "Slides via MCP tools only"}
                 </p>
               </button>
             ))}
           </div>
-
-          {/* MCP note */}
-          <p className="text-xs opacity-30 leading-relaxed border border-white/8 rounded-md px-4 py-3">
-            When accessed via <span className="opacity-70">Claude Code MCP</span>, Claude
-            generates slides directly — no API key needed. This setting only applies to
-            the web UI below.
-          </p>
-        </section>
-
-        {/* ── API Key ──────────────────────────────────────────────────── */}
-        <section className="space-y-4">
-          <h2 className="text-xs font-semibold uppercase tracking-widest opacity-40">
-            API Key
-            <span className="ml-2 normal-case tracking-normal font-normal opacity-60">
-              — {settings.provider === "anthropic" ? "Anthropic" : "OpenAI"}
-            </span>
-          </h2>
-
-          <div className="space-y-3">
-            <input
-              type="password"
-              placeholder={
-                settings.provider === "anthropic"
-                  ? "sk-ant-… (leave blank to use ANTHROPIC_API_KEY env var)"
-                  : "sk-… (leave blank to use OPENAI_API_KEY env var)"
-              }
-              value={activeKey}
-              onChange={(e) =>
-                setSettings((s) =>
-                  settings.provider === "anthropic"
-                    ? { ...s, anthropicKey: e.target.value }
-                    : { ...s, openaiKey: e.target.value }
-                )
-              }
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm placeholder:opacity-25 focus:outline-none focus:border-white/30 transition-colors font-mono"
-            />
-            <p className="text-xs opacity-25">
-              Stored in <code>localStorage</code> — never sent to our servers, only forwarded to{" "}
-              {settings.provider === "anthropic" ? "api.anthropic.com" : "api.openai.com"} on
-              generation.
-            </p>
-          </div>
-
           <button
+            type="button"
             onClick={handleSave}
             className="text-sm border border-white/20 rounded-lg px-5 py-2.5 hover:bg-white/5 transition-colors"
           >
-            {status.type === "saved" ? "✓ Saved" : "Save Settings"}
+            {status.type === "saved" ? "✓ Saved" : "Save settings"}
           </button>
         </section>
 
-        {/* ── Generate ─────────────────────────────────────────────────── */}
-        <section className="space-y-4 border-t border-white/8 pt-10">
-          <h2 className="text-xs font-semibold uppercase tracking-widest opacity-40">
-            Generate or update
-          </h2>
-
-          <div className="space-y-3">
-            <input
-              type="text"
-              placeholder="Topic for a new deck, or instructions to change the current deck"
-              value={topic}
-              maxLength={200}
-              onChange={(e) => {
-                setTopic(e.target.value);
-                if (status.type === "error") setStatus({ type: "idle" });
-              }}
-              onKeyDown={(e) => e.key === "Enter" && void handleGenerate()}
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm placeholder:opacity-25 focus:outline-none focus:border-white/30 transition-colors"
-            />
-
-            {status.type === "error" && (
-              <p className="text-xs text-red-400 opacity-80">{status.msg}</p>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => void handleGenerate()}
-                disabled={status.type === "generating"}
-                className="w-full rounded-lg bg-white text-black text-sm font-medium py-3 hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {status.type === "generating" ? "Working…" : "New deck"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleUpdateExisting()}
-                disabled={status.type === "generating"}
-                className="w-full rounded-lg border border-white/25 text-sm font-medium py-3 hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {status.type === "generating" ? "Working…" : "Update existing"}
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => router.push("/?chat=1")}
-              className="w-full text-xs opacity-40 hover:opacity-70 transition-opacity border border-white/10 rounded-lg py-2"
-            >
-              Open chat panel on the viewer →
-            </button>
-
-            <p className="text-xs opacity-25 text-center">
-              Using{" "}
-              <span className="opacity-70">
-                {settings.provider === "anthropic" ? "Claude (Anthropic)" : "OpenAI"}
-              </span>
-              {!activeKey && " · key from env var"}
+        {!isWeb && (
+          <section className="space-y-4 border-t border-white/8 pt-10">
+            <h2 className="text-xs font-semibold uppercase tracking-widest opacity-40">
+              MCP workflow
+            </h2>
+            <p className="text-sm opacity-60 leading-relaxed">
+              Connect Claude Code to this app’s MCP endpoint (stdio locally or HTTP on deploy).
+              Use tools such as <code className="text-xs opacity-80">get_slides</code>,{" "}
+              <code className="text-xs opacity-80">list_slide_types</code>, and{" "}
+              <code className="text-xs opacity-80">set_slides</code>—Claude builds or edits JSON;
+              this UI does not call the generate APIs.
             </p>
-          </div>
-        </section>
+            <p className="text-xs opacity-35">
+              The viewer reads <code className="opacity-50">localStorage</code>. After MCP changes,
+              sync JSON into the browser the way you deploy (e.g. paste or rebuild).
+            </p>
+          </section>
+        )}
+
+        {isWeb && (
+          <>
+            <section className="space-y-4 border-t border-white/8 pt-10">
+              <h2 className="text-xs font-semibold uppercase tracking-widest opacity-40">
+                AI Provider
+              </h2>
+
+              <div className="grid grid-cols-2 gap-3">
+                {(["anthropic", "openai"] as Provider[]).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setSettings((s) => ({ ...s, provider: p }))}
+                    className={`relative rounded-lg border px-5 py-4 text-left transition-all ${
+                      settings.provider === p
+                        ? "border-white/60 bg-white/5"
+                        : "border-white/10 hover:border-white/25"
+                    }`}
+                  >
+                    {settings.provider === p && (
+                      <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-white" />
+                    )}
+                    <p className="text-sm font-medium">
+                      {p === "anthropic" ? "Claude" : "OpenAI"}
+                    </p>
+                    <p className="mt-0.5 text-xs opacity-40">
+                      {p === "anthropic" ? "Anthropic · claude-sonnet-4-6" : "OpenAI · gpt-4o"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="space-y-4">
+              <h2 className="text-xs font-semibold uppercase tracking-widest opacity-40">
+                API Key
+                <span className="ml-2 font-normal normal-case tracking-normal opacity-60">
+                  — {settings.provider === "anthropic" ? "Anthropic" : "OpenAI"}
+                </span>
+              </h2>
+
+              <div className="space-y-3">
+                <input
+                  type="password"
+                  placeholder={
+                    settings.provider === "anthropic"
+                      ? "sk-ant-… (leave blank to use ANTHROPIC_API_KEY env var)"
+                      : "sk-… (leave blank to use OPENAI_API_KEY env var)"
+                  }
+                  value={activeKey}
+                  onChange={(e) =>
+                    setSettings((s) =>
+                      settings.provider === "anthropic"
+                        ? { ...s, anthropicKey: e.target.value }
+                        : { ...s, openaiKey: e.target.value }
+                    )
+                  }
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 font-mono text-sm transition-colors placeholder:opacity-25 focus:border-white/30 focus:outline-none"
+                />
+                <p className="text-xs opacity-25">
+                  Stored in <code>localStorage</code> — forwarded only to{" "}
+                  {settings.provider === "anthropic" ? "api.anthropic.com" : "api.openai.com"} when
+                  you generate or update from this page.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSave}
+                className="text-sm border border-white/20 rounded-lg px-5 py-2.5 hover:bg-white/5 transition-colors"
+              >
+                {status.type === "saved" ? "✓ Saved" : "Save settings"}
+              </button>
+            </section>
+
+            <section className="space-y-4 border-t border-white/8 pt-10">
+              <h2 className="text-xs font-semibold uppercase tracking-widest opacity-40">
+                Generate or update
+              </h2>
+
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  placeholder="Topic for a new deck, or instructions to change the current deck"
+                  value={topic}
+                  maxLength={200}
+                  onChange={(e) => {
+                    setTopic(e.target.value);
+                    if (status.type === "error") setStatus({ type: "idle" });
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && void handleGenerate()}
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm transition-colors placeholder:opacity-25 focus:border-white/30 focus:outline-none"
+                />
+
+                {status.type === "error" && (
+                  <p className="text-xs text-red-400 opacity-80">{status.msg}</p>
+                )}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerate()}
+                    disabled={status.type === "generating"}
+                    className="w-full rounded-lg bg-white py-3 text-sm font-medium text-black transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {status.type === "generating" ? "Working…" : "New deck"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleUpdateExisting()}
+                    disabled={status.type === "generating"}
+                    className="w-full rounded-lg border border-white/25 py-3 text-sm font-medium transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {status.type === "generating" ? "Working…" : "Update existing"}
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => router.push("/?chat=1")}
+                  className="w-full rounded-lg border border-white/10 py-2 text-xs opacity-40 transition-opacity hover:opacity-70"
+                >
+                  Open chat panel on the viewer →
+                </button>
+
+                <p className="text-center text-xs opacity-25">
+                  Using{" "}
+                  <span className="opacity-70">
+                    {settings.provider === "anthropic" ? "Claude (Anthropic)" : "OpenAI"}
+                  </span>
+                  {!activeKey && " · key from env var"}
+                </p>
+              </div>
+            </section>
+          </>
+        )}
       </main>
     </div>
   );

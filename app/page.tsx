@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { MessageSquare } from "lucide-react";
 import { DEFAULT_SLIDES } from "@/lib/defaultSlides";
+import { getDeckSource } from "@/lib/autoslidesSettings";
 import { SlidesSchema, type Slide } from "@/schemas/slideSchema";
 import { renderSlide } from "@/components/slides/registry";
 import { ChatSlidePanel } from "@/components/ChatSlidePanel";
@@ -23,16 +24,27 @@ export default function Home() {
   const [index, setIndex] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [deckSource, setDeckSource] = useState<"web" | "mcp">("web");
 
   useEffect(() => {
     setSlides(loadSlides());
+    setDeckSource(getDeckSource());
+  }, []);
+
+  useEffect(() => {
+    const sync = () => {
+      setDeckSource(getDeckSource());
+      setSlides(loadSlides());
+    };
+    window.addEventListener("focus", sync);
+    return () => window.removeEventListener("focus", sync);
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const q = new URLSearchParams(window.location.search);
     if (q.get("chat") === "1") {
-      setChatOpen(true);
+      if (getDeckSource() === "web") setChatOpen(true);
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -96,64 +108,76 @@ export default function Home() {
 
   const slide = slides[index];
   const isDark = slide.theme === "dark";
+  const showChat = deckSource === "web";
 
   return (
     <div
-      className={`w-screen h-screen relative overflow-hidden transition-colors duration-300 ${
+      className={`flex h-screen w-screen overflow-hidden transition-colors duration-300 ${
         isDark ? "bg-black text-white" : "bg-white text-black"
       }`}
     >
-      {processing && (
-        <div
-          className={`absolute top-4 left-1/2 z-40 -translate-x-1/2 rounded-full border px-4 py-2 text-xs font-medium shadow-lg ${
-            isDark
-              ? "border-amber-400/40 bg-amber-500/15 text-amber-100"
-              : "border-amber-600/30 bg-amber-50 text-amber-900"
-          }`}
-        >
-          Updating slides…
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {processing && (
+          <div
+            className={`absolute top-4 left-1/2 z-40 -translate-x-1/2 rounded-full border px-4 py-2 text-xs font-medium shadow-lg ${
+              isDark
+                ? "border-amber-400/40 bg-amber-500/15 text-amber-100"
+                : "border-amber-600/30 bg-amber-50 text-amber-900"
+            }`}
+          >
+            Updating slides…
+          </div>
+        )}
+
+        <div key={index} className="min-h-0 flex-1 overflow-hidden animate-fade-in">
+          {renderSlide(slide)}
         </div>
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end">
+          <div className="pointer-events-auto mb-5 mr-8 flex items-center gap-4">
+            {showChat && (
+              <button
+                type="button"
+                onClick={() => setChatOpen((o) => !o)}
+                className={`text-xs transition-opacity border border-current/20 rounded px-2 py-1 inline-flex items-center gap-1.5 ${
+                  chatOpen ? "opacity-80" : "opacity-40 hover:opacity-80"
+                }`}
+                title={chatOpen ? "Close chat" : "Chat to update this deck"}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Chat
+              </button>
+            )}
+            <Link
+              href="/settings"
+              className="text-xs opacity-40 hover:opacity-80 transition-opacity border border-current/20 rounded px-2 py-1"
+            >
+              {showChat ? "Generate" : "Settings"}
+            </Link>
+            <button
+              type="button"
+              onClick={() => void exportPptx()}
+              className="text-xs opacity-40 hover:opacity-80 transition-opacity border border-current/20 rounded px-2 py-1"
+            >
+              Export PPTX
+            </button>
+            <span className="text-sm opacity-30 tabular-nums">
+              {index + 1} / {slides.length}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {chatOpen && showChat && (
+        <aside className="flex h-full w-full max-w-[min(420px,42vw)] shrink-0 flex-col border-l border-black/10 bg-zinc-950 text-white shadow-2xl dark:border-white/10">
+          <ChatSlidePanel
+            onClose={() => setChatOpen(false)}
+            slides={slides}
+            onSlidesUpdated={handleSlidesUpdated}
+            onProcessingChange={setProcessing}
+          />
+        </aside>
       )}
-
-      <div key={index} className="w-full h-full animate-fade-in">
-        {renderSlide(slide)}
-      </div>
-
-      <div className="absolute bottom-5 right-8 flex items-center gap-4">
-        <button
-          type="button"
-          onClick={() => setChatOpen(true)}
-          className="text-xs opacity-40 hover:opacity-80 transition-opacity border border-current/20 rounded px-2 py-1 inline-flex items-center gap-1.5"
-          title="Chat to update this deck"
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          Chat
-        </button>
-        <Link
-          href="/settings"
-          className="text-xs opacity-40 hover:opacity-80 transition-opacity border border-current/20 rounded px-2 py-1"
-        >
-          Generate
-        </Link>
-        <button
-          type="button"
-          onClick={() => void exportPptx()}
-          className="text-xs opacity-40 hover:opacity-80 transition-opacity border border-current/20 rounded px-2 py-1"
-        >
-          Export PPTX
-        </button>
-        <span className="text-sm opacity-30 tabular-nums">
-          {index + 1} / {slides.length}
-        </span>
-      </div>
-
-      <ChatSlidePanel
-        open={chatOpen}
-        onClose={() => setChatOpen(false)}
-        slides={slides}
-        onSlidesUpdated={handleSlidesUpdated}
-        onProcessingChange={setProcessing}
-      />
     </div>
   );
 }
