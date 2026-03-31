@@ -50,8 +50,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "get_slides",
-      description: "Read all slides from data/slides.json. Returns the full slide array.",
+      description: "Read all slides from data/slides.json. Returns the full slide array with 1-based page numbers.",
       inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "get_slide",
+      description:
+        "Get a specific slide by 1-based page number, or pass page=0 to get the full presentation data (total count + all slides with page numbers). Use this to inspect any exact slide.",
+      inputSchema: {
+        type: "object",
+        required: ["page"],
+        properties: {
+          page: {
+            type: "number",
+            description: "1-based slide number. Pass 0 to return all slides with metadata.",
+          },
+        },
+      },
     },
     {
       name: "set_slides",
@@ -129,8 +144,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       // ── get_slides ───────────────────────────────────────────────────────
       case "get_slides": {
         const slides = readSlides();
+        const annotated = slides.map((slide, i) => ({ page: i + 1, ...slide }));
         return {
-          content: [{ type: "text", text: JSON.stringify(slides, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify({ total: slides.length, slides: annotated }, null, 2) }],
+        };
+      }
+
+      // ── get_slide ────────────────────────────────────────────────────────
+      case "get_slide": {
+        const slides = readSlides();
+        const page = Number(args.page);
+        if (page === 0) {
+          const annotated = slides.map((slide, i) => ({ page: i + 1, ...slide }));
+          return {
+            content: [{ type: "text", text: JSON.stringify({ total: slides.length, slides: annotated }, null, 2) }],
+          };
+        }
+        if (!Number.isInteger(page) || page < 1 || page > slides.length) {
+          throw new Error(`page must be 0 (all) or 1–${slides.length}`);
+        }
+        const slide = slides[page - 1];
+        return {
+          content: [{ type: "text", text: JSON.stringify({ page, total: slides.length, slide }, null, 2) }],
         };
       }
 

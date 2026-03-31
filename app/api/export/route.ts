@@ -294,14 +294,7 @@ function addEndSlide(pptx: PptxGenJS, slide: Extract<Slide, { type: "end" }>) {
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
-export async function GET() {
-  let slides: Slide[];
-  try {
-    slides = SlidesSchema.parse(rawSlides);
-  } catch (err) {
-    return NextResponse.json({ error: "Invalid slides.json" }, { status: 500 });
-  }
-
+async function buildPptx(slides: Slide[]): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE"; // 13.33" × 7.5"
   pptx.title = "AutoSlides Export";
@@ -320,12 +313,46 @@ export async function GET() {
     }
   }
 
-  const buffer = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
+  return (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
+}
+
+export async function GET(request: Request) {
+  let allSlides: Slide[];
+  try {
+    allSlides = SlidesSchema.parse(rawSlides);
+  } catch {
+    return NextResponse.json({ error: "Invalid slides.json" }, { status: 500 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const pageParam = searchParams.get("page");
+
+  // page=0 or missing → export all slides
+  // page=N (1-based) → export that single slide
+  let slides: Slide[];
+  let filename: string;
+
+  if (pageParam !== null && pageParam !== "0") {
+    const page = Number(pageParam);
+    if (!Number.isInteger(page) || page < 1 || page > allSlides.length) {
+      return NextResponse.json(
+        { error: `page must be 0 (all) or 1–${allSlides.length}` },
+        { status: 400 }
+      );
+    }
+    slides = [allSlides[page - 1]];
+    filename = `slide-${page}.pptx`;
+  } else {
+    slides = allSlides;
+    filename = "presentation.pptx";
+  }
+
+  const buffer = await buildPptx(slides);
 
   return new Response(buffer as unknown as BodyInit, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      "Content-Disposition": 'attachment; filename="presentation.pptx"',
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
 }
