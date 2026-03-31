@@ -1,4 +1,7 @@
-[
+import { SlidesSchema, type Slide } from "@/schemas/slideSchema";
+
+/** Vetted default deck when nothing is in localStorage and no MCP file exists yet. */
+const RAW_JSON = `[
   {
     "type": "title",
     "title": "GitHub Repo Chat",
@@ -156,4 +159,6 @@
     "title": "Let's Build It.",
     "theme": "dark"
   }
-]
+]`;
+
+export const DEFAULT_SLIDES: Slide[] = SlidesSchema.parse(JSON.parse(RAW_JSON));

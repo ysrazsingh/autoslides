@@ -22,6 +22,9 @@
 
 # misc
 .DS_Store
+
+# local MCP slide file (seeded from lib/defaultSlides when missing)
+data/mcp-slides.json
 *.pem
 
 # debug

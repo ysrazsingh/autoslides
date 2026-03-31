@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import type { Slide } from "@/schemas/slideSchema";
+import { SlidesSchema, type Slide } from "@/schemas/slideSchema";
 
 type Provider = "anthropic" | "openai";
 
@@ -13,6 +13,18 @@ interface Settings {
 }
 
 const STORAGE_KEY = "autoslides_settings";
+const GENERATED_KEY = "autoslides_generated";
+
+function loadStoredSlides(): Slide[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(GENERATED_KEY);
+    if (!raw) return null;
+    return SlidesSchema.parse(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
 
 function loadSettings(): Settings {
   if (typeof window === "undefined") {
@@ -85,8 +97,50 @@ export default function SettingsPage() {
 
       const slides: Slide[] = await res.json();
 
-      // Persist slides and navigate to the viewer
-      localStorage.setItem("autoslides_generated", JSON.stringify(slides));
+      localStorage.setItem(GENERATED_KEY, JSON.stringify(slides));
+      router.push("/");
+    } catch (err) {
+      setStatus({ type: "error", msg: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function handleUpdateExisting() {
+    const apiKey =
+      settings.provider === "anthropic" ? settings.anthropicKey : settings.openaiKey;
+
+    const existing = loadStoredSlides();
+    if (!existing?.length) {
+      setStatus({ type: "error", msg: "No saved presentation. Generate a deck first." });
+      return;
+    }
+
+    if (!topic.trim()) {
+      setStatus({ type: "error", msg: "Describe what to change." });
+      return;
+    }
+
+    setStatus({ type: "generating" });
+
+    try {
+      const res = await fetch("/api/chat-update", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          instruction: topic.trim(),
+          slides: existing,
+          provider: settings.provider,
+          stream: false,
+          ...(apiKey ? { apiKey } : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error ?? res.statusText);
+      }
+
+      const updated: Slide[] = await res.json();
+      localStorage.setItem(GENERATED_KEY, JSON.stringify(updated));
       router.push("/");
     } catch (err) {
       setStatus({ type: "error", msg: err instanceof Error ? err.message : String(err) });
@@ -195,20 +249,20 @@ export default function SettingsPage() {
         {/* ── Generate ─────────────────────────────────────────────────── */}
         <section className="space-y-4 border-t border-white/8 pt-10">
           <h2 className="text-xs font-semibold uppercase tracking-widest opacity-40">
-            Generate Presentation
+            Generate or update
           </h2>
 
           <div className="space-y-3">
             <input
               type="text"
-              placeholder="e.g. The future of renewable energy"
+              placeholder="Topic for a new deck, or instructions to change the current deck"
               value={topic}
               maxLength={200}
               onChange={(e) => {
                 setTopic(e.target.value);
                 if (status.type === "error") setStatus({ type: "idle" });
               }}
-              onKeyDown={(e) => e.key === "Enter" && handleGenerate()}
+              onKeyDown={(e) => e.key === "Enter" && void handleGenerate()}
               className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm placeholder:opacity-25 focus:outline-none focus:border-white/30 transition-colors"
             />
 
@@ -216,12 +270,31 @@ export default function SettingsPage() {
               <p className="text-xs text-red-400 opacity-80">{status.msg}</p>
             )}
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => void handleGenerate()}
+                disabled={status.type === "generating"}
+                className="w-full rounded-lg bg-white text-black text-sm font-medium py-3 hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {status.type === "generating" ? "Working…" : "New deck"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleUpdateExisting()}
+                disabled={status.type === "generating"}
+                className="w-full rounded-lg border border-white/25 text-sm font-medium py-3 hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {status.type === "generating" ? "Working…" : "Update existing"}
+              </button>
+            </div>
+
             <button
-              onClick={handleGenerate}
-              disabled={status.type === "generating"}
-              className="w-full rounded-lg bg-white text-black text-sm font-medium py-3 hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              type="button"
+              onClick={() => router.push("/?chat=1")}
+              className="w-full text-xs opacity-40 hover:opacity-70 transition-opacity border border-white/10 rounded-lg py-2"
             >
-              {status.type === "generating" ? "Generating…" : "Generate Slides"}
+              Open chat panel on the viewer →
             </button>
 
             <p className="text-xs opacity-25 text-center">

@@ -1,37 +1,40 @@
-'use client';
-import { useState, useEffect } from "react";
+"use client";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import staticSlides from "@/data/slides.json";
+import { MessageSquare } from "lucide-react";
+import { DEFAULT_SLIDES } from "@/lib/defaultSlides";
 import { SlidesSchema, type Slide } from "@/schemas/slideSchema";
 import { renderSlide } from "@/components/slides/registry";
+import { ChatSlidePanel } from "@/components/ChatSlidePanel";
 
 const GENERATED_KEY = "autoslides_generated";
 
-function parseStatic(): Slide[] {
-  try {
-    return SlidesSchema.parse(staticSlides);
-  } catch (err) {
-    console.error("slides.json failed validation:", err);
-    return [];
-  }
-}
-
 function loadSlides(): Slide[] {
-  if (typeof window === "undefined") return parseStatic();
+  if (typeof window === "undefined") return DEFAULT_SLIDES;
   try {
     const raw = localStorage.getItem(GENERATED_KEY);
     if (raw) return SlidesSchema.parse(JSON.parse(raw));
   } catch {}
-  return parseStatic();
+  return DEFAULT_SLIDES;
 }
 
 export default function Home() {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [index, setIndex] = useState(0);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
-  // Load slides (static or generated) once on mount
   useEffect(() => {
     setSlides(loadSlides());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("chat") === "1") {
+      setChatOpen(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
 
   useEffect(() => {
@@ -48,6 +51,39 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
+  }, [slides]);
+
+  const handleSlidesUpdated = useCallback((next: Slide[]) => {
+    try {
+      localStorage.setItem(GENERATED_KEY, JSON.stringify(next));
+    } catch {}
+    setSlides(next);
+    setIndex((i) => Math.min(i, Math.max(0, next.length - 1)));
+  }, []);
+
+  const exportPptx = useCallback(async () => {
+    if (slides.length === 0) return;
+    try {
+      const res = await fetch("/api/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slides }),
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        console.error("Export failed:", t);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "presentation.pptx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    }
   }, [slides]);
 
   if (slides.length === 0) {
@@ -67,29 +103,57 @@ export default function Home() {
         isDark ? "bg-black text-white" : "bg-white text-black"
       }`}
     >
-      {/* key forces remount (and animate-fade-in) on slide change */}
+      {processing && (
+        <div
+          className={`absolute top-4 left-1/2 z-40 -translate-x-1/2 rounded-full border px-4 py-2 text-xs font-medium shadow-lg ${
+            isDark
+              ? "border-amber-400/40 bg-amber-500/15 text-amber-100"
+              : "border-amber-600/30 bg-amber-50 text-amber-900"
+          }`}
+        >
+          Updating slides…
+        </div>
+      )}
+
       <div key={index} className="w-full h-full animate-fade-in">
         {renderSlide(slide)}
       </div>
 
       <div className="absolute bottom-5 right-8 flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => setChatOpen(true)}
+          className="text-xs opacity-40 hover:opacity-80 transition-opacity border border-current/20 rounded px-2 py-1 inline-flex items-center gap-1.5"
+          title="Chat to update this deck"
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          Chat
+        </button>
         <Link
           href="/settings"
           className="text-xs opacity-40 hover:opacity-80 transition-opacity border border-current/20 rounded px-2 py-1"
         >
           Generate
         </Link>
-        <a
-          href="/api/export"
-          download="presentation.pptx"
+        <button
+          type="button"
+          onClick={() => void exportPptx()}
           className="text-xs opacity-40 hover:opacity-80 transition-opacity border border-current/20 rounded px-2 py-1"
         >
           Export PPTX
-        </a>
+        </button>
         <span className="text-sm opacity-30 tabular-nums">
           {index + 1} / {slides.length}
         </span>
       </div>
+
+      <ChatSlidePanel
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        slides={slides}
+        onSlidesUpdated={handleSlidesUpdated}
+        onProcessingChange={setProcessing}
+      />
     </div>
   );
 }

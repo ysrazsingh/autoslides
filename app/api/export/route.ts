@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import PptxGenJS from "pptxgenjs";
 import { SlidesSchema, type Slide, type Typography } from "@/schemas/slideSchema";
-import rawSlides from "@/data/slides.json";
+import { DEFAULT_SLIDES } from "@/lib/defaultSlides";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -405,12 +405,7 @@ async function buildPptx(slides: Slide[]): Promise<Buffer> {
 }
 
 export async function GET(request: Request) {
-  let allSlides: Slide[];
-  try {
-    allSlides = SlidesSchema.parse(rawSlides);
-  } catch {
-    return NextResponse.json({ error: "Invalid slides.json" }, { status: 500 });
-  }
+  const allSlides = DEFAULT_SLIDES;
 
   const { searchParams } = new URL(request.url);
   const pageParam = searchParams.get("page");
@@ -421,6 +416,57 @@ export async function GET(request: Request) {
   let filename: string;
 
   if (pageParam !== null && pageParam !== "0") {
+    const page = Number(pageParam);
+    if (!Number.isInteger(page) || page < 1 || page > allSlides.length) {
+      return NextResponse.json(
+        { error: `page must be 0 (all) or 1–${allSlides.length}` },
+        { status: 400 }
+      );
+    }
+    slides = [allSlides[page - 1]];
+    filename = `slide-${page}.pptx`;
+  } else {
+    slides = allSlides;
+    filename = "presentation.pptx";
+  }
+
+  const buffer = await buildPptx(slides);
+
+  return new Response(buffer as unknown as BodyInit, {
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    },
+  });
+}
+
+/** Client sends slides from localStorage (source of truth in the browser). */
+export async function POST(req: Request) {
+  let body: { slides?: unknown; page?: string | number };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  let allSlides: Slide[];
+  try {
+    allSlides = SlidesSchema.parse(body?.slides);
+  } catch {
+    return NextResponse.json({ error: "Invalid slides" }, { status: 400 });
+  }
+
+  if (allSlides.length === 0) {
+    return NextResponse.json({ error: "No slides to export" }, { status: 400 });
+  }
+
+  const pageParam =
+    body.page !== undefined && body.page !== null ? String(body.page) : null;
+
+  let slides: Slide[];
+  let filename: string;
+
+  if (pageParam !== null && pageParam !== "0" && pageParam !== "") {
     const page = Number(pageParam);
     if (!Number.isInteger(page) || page < 1 || page > allSlides.length) {
       return NextResponse.json(

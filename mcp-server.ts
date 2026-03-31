@@ -2,7 +2,7 @@
 /**
  * AutoSlides MCP Server
  *
- * Exposes tools for Claude Code to read and manage slides in data/slides.json.
+ * Exposes tools for Claude Code to read and manage slides in data/mcp-slides.json.
  *
  * Tools:
  *   get_slides       — read all slides
@@ -19,17 +19,25 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SlidesSchema, SlideSchema, TypographySchema, type Slide } from "./schemas/slideSchema.js";
+import { DEFAULT_SLIDES } from "./lib/defaultSlides.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SLIDES_PATH = join(__dirname, "data/slides.json");
+const SLIDES_PATH = join(__dirname, "data/mcp-slides.json");
 
 function readSlides(): Slide[] {
-  const raw = JSON.parse(readFileSync(SLIDES_PATH, "utf-8"));
-  return SlidesSchema.parse(raw);
+  if (!existsSync(SLIDES_PATH)) {
+    return DEFAULT_SLIDES;
+  }
+  try {
+    const raw = JSON.parse(readFileSync(SLIDES_PATH, "utf-8"));
+    return SlidesSchema.parse(raw);
+  } catch {
+    return DEFAULT_SLIDES;
+  }
 }
 
 function writeSlides(slides: Slide[]): void {
@@ -50,7 +58,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "get_slides",
-      description: "Read all slides from data/slides.json. Returns the full slide array with 1-based page numbers.",
+      description: "Read all slides from data/mcp-slides.json. Returns the full slide array with 1-based page numbers.",
       inputSchema: { type: "object", properties: {} },
     },
     {
@@ -71,7 +79,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "set_slides",
       description:
-        "Replace ALL slides in data/slides.json. The array is validated against the Zod schema before writing — invalid slides are rejected with an error.",
+        "Replace ALL slides in data/mcp-slides.json. The array is validated against the Zod schema before writing — invalid slides are rejected with an error.",
       inputSchema: {
         type: "object",
         required: ["slides"],
@@ -210,7 +218,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         writeSlides(slides);
         return {
           content: [
-            { type: "text", text: `Wrote ${slides.length} slides to data/slides.json.` },
+            { type: "text", text: `Wrote ${slides.length} slides to data/mcp-slides.json.` },
           ],
         };
       }

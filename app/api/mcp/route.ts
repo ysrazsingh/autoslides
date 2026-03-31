@@ -14,7 +14,7 @@
  * Vercel's filesystem is read-only at runtime. Write tools (set_slides,
  * add_slide, update_slide, delete_slide) return the modified slide array
  * as JSON content instead of persisting it. Copy the result back to
- * data/slides.json and redeploy, or set up Vercel Blob/KV for live writes.
+ * data/mcp-slides.json and redeploy, or set up Vercel Blob/KV for live writes.
  *
  * In local dev (no VERCEL env var) write tools write to disk as normal.
  */
@@ -26,18 +26,26 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SlidesSchema, SlideSchema, TypographySchema, type Slide } from "@/schemas/slideSchema";
+import { DEFAULT_SLIDES } from "@/lib/defaultSlides";
 
 // ── Storage helpers ───────────────────────────────────────────────────────────
 
-const SLIDES_PATH = join(process.cwd(), "data/slides.json");
+const SLIDES_PATH = join(process.cwd(), "data/mcp-slides.json");
 const IS_VERCEL = !!process.env.VERCEL;
 
 function readSlides(): Slide[] {
-  const raw = JSON.parse(readFileSync(SLIDES_PATH, "utf-8"));
-  return SlidesSchema.parse(raw);
+  if (!existsSync(SLIDES_PATH)) {
+    return DEFAULT_SLIDES;
+  }
+  try {
+    const raw = JSON.parse(readFileSync(SLIDES_PATH, "utf-8"));
+    return SlidesSchema.parse(raw);
+  } catch {
+    return DEFAULT_SLIDES;
+  }
 }
 
 function writeSlides(slides: Slide[]): void {
@@ -107,8 +115,8 @@ function createMCPServer(): Server {
       {
         name: "set_slides",
         description: IS_VERCEL
-          ? "Compute a new slide array (Zod-validated). On Vercel the result is returned as JSON — copy it to data/slides.json and redeploy to persist."
-          : "Replace ALL slides in data/slides.json. Zod-validated before writing.",
+          ? "Compute a new slide array (Zod-validated). On Vercel the result is returned as JSON — copy it to data/mcp-slides.json and redeploy to persist."
+          : "Replace ALL slides in data/mcp-slides.json. Zod-validated before writing.",
         inputSchema: {
           type: "object",
           required: ["slides"],
@@ -123,7 +131,7 @@ function createMCPServer(): Server {
       {
         name: "add_slide",
         description: IS_VERCEL
-          ? "Insert a slide and return the updated array. On Vercel copy the result to data/slides.json and redeploy to persist."
+          ? "Insert a slide and return the updated array. On Vercel copy the result to data/mcp-slides.json and redeploy to persist."
           : "Insert a slide at a specific position (0-based). Omit index to append.",
         inputSchema: {
           type: "object",
@@ -140,7 +148,7 @@ function createMCPServer(): Server {
       {
         name: "update_slide",
         description: IS_VERCEL
-          ? "Overwrite a slide and return the updated array. On Vercel copy the result to data/slides.json and redeploy to persist."
+          ? "Overwrite a slide and return the updated array. On Vercel copy the result to data/mcp-slides.json and redeploy to persist."
           : "Overwrite a single slide at a specific 0-based index.",
         inputSchema: {
           type: "object",
@@ -154,7 +162,7 @@ function createMCPServer(): Server {
       {
         name: "delete_slide",
         description: IS_VERCEL
-          ? "Remove a slide and return the updated array. On Vercel copy the result to data/slides.json and redeploy to persist."
+          ? "Remove a slide and return the updated array. On Vercel copy the result to data/mcp-slides.json and redeploy to persist."
           : "Remove the slide at a specific 0-based index.",
         inputSchema: {
           type: "object",
@@ -261,8 +269,8 @@ function createMCPServer(): Server {
           const slides = SlidesSchema.parse(args.slides);
           const result = applyWrite(slides);
           const msg = result.persisted
-            ? `Wrote ${slides.length} slides to data/slides.json.`
-            : `Computed ${slides.length} slides. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
+            ? `Wrote ${slides.length} slides to data/mcp-slides.json.`
+            : `Computed ${slides.length} slides. Filesystem is read-only on Vercel — copy the JSON below to data/mcp-slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
           return { content: [{ type: "text", text: msg }] };
         }
 
@@ -280,7 +288,7 @@ function createMCPServer(): Server {
           const result = applyWrite(slides);
           const msg = result.persisted
             ? `Inserted slide at index ${idx}. Total: ${slides.length} slides.`
-            : `Computed insert at index ${idx}. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
+            : `Computed insert at index ${idx}. Filesystem is read-only on Vercel — copy the JSON below to data/mcp-slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
           return { content: [{ type: "text", text: msg }] };
         }
 
@@ -294,7 +302,7 @@ function createMCPServer(): Server {
           const result = applyWrite(slides);
           const msg = result.persisted
             ? `Updated slide at index ${idx}.`
-            : `Computed update at index ${idx}. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
+            : `Computed update at index ${idx}. Filesystem is read-only on Vercel — copy the JSON below to data/mcp-slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
           return { content: [{ type: "text", text: msg }] };
         }
 
@@ -308,7 +316,7 @@ function createMCPServer(): Server {
           const result = applyWrite(slides);
           const msg = result.persisted
             ? `Deleted slide at index ${idx} (type: "${removed.type}"). Total: ${slides.length} slides.`
-            : `Computed delete at index ${idx} (type: "${removed.type}"). Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
+            : `Computed delete at index ${idx} (type: "${removed.type}"). Filesystem is read-only on Vercel — copy the JSON below to data/mcp-slides.json and redeploy:\n\n${JSON.stringify(slides, null, 2)}`;
           return { content: [{ type: "text", text: msg }] };
         }
 
@@ -359,7 +367,7 @@ function createMCPServer(): Server {
             const result = applyWrite(SlidesSchema.parse(updated));
             const msg = result.persisted
               ? `Applied typography to all ${slides.length} slides.`
-              : `Computed typography update for all ${slides.length} slides. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(SlidesSchema.parse(updated), null, 2)}`;
+              : `Computed typography update for all ${slides.length} slides. Filesystem is read-only on Vercel — copy the JSON below to data/mcp-slides.json and redeploy:\n\n${JSON.stringify(SlidesSchema.parse(updated), null, 2)}`;
             return { content: [{ type: "text", text: msg }] };
           } else {
             if (!Number.isInteger(page) || page < 1 || page > slides.length) {
@@ -372,7 +380,7 @@ function createMCPServer(): Server {
             const result = applyWrite(SlidesSchema.parse(updated));
             const msg = result.persisted
               ? `Applied typography to slide ${page} (${slides[idx].type}).`
-              : `Computed typography update for slide ${page}. Filesystem is read-only on Vercel — copy the JSON below to data/slides.json and redeploy:\n\n${JSON.stringify(SlidesSchema.parse(updated), null, 2)}`;
+              : `Computed typography update for slide ${page}. Filesystem is read-only on Vercel — copy the JSON below to data/mcp-slides.json and redeploy:\n\n${JSON.stringify(SlidesSchema.parse(updated), null, 2)}`;
             return { content: [{ type: "text", text: msg }] };
           }
         }
