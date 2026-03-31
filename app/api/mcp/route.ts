@@ -20,6 +20,7 @@
  */
 
 import { NextRequest } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -66,12 +67,17 @@ function applyWrite(
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
 function checkAuth(req: NextRequest): Response | null {
   const secret = process.env.MCP_SECRET;
-  if (!secret) return null; // no secret configured — open access (local dev)
+  if (!secret) return null;
 
-  const auth = req.headers.get("authorization");
-  if (auth !== `Bearer ${secret}`) {
+  const auth = req.headers.get("authorization") ?? "";
+  if (!safeEqual(auth, `Bearer ${secret}`)) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { "content-type": "application/json" },

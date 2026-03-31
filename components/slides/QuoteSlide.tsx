@@ -14,7 +14,7 @@ export default function QuoteSlide({ quote, author, typography }: QuoteSlide) {
       </span>
       <blockquote
         className="text-3xl font-medium leading-relaxed max-w-4xl -mt-6"
-        style={{ ...t.body, ...(t.body.fontSize ? {} : {}), textAlign: "center" }}
+        style={{ ...t.body, textAlign: "center" }}
       >
         <RichText>{quote}</RichText>
       </blockquote>
