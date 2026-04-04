@@ -34,7 +34,7 @@ There is no `data/slides.json`. The browser stores slides in `localStorage` (key
 
 | Mode | Source of truth | How slides are edited |
 |------|----------------|-----------------------|
-| **Web** (default) | `localStorage` | Browser calls `/api/generate` and `/api/chat-update` via the deck panel |
+| **Web** (default) | `localStorage` | Browser calls `/api/deck` via the deck panel |
 | **Claude Code (MCP)** | `data/mcp-slides.json` | Claude uses MCP tools directly; the web UI makes no API calls |
 
 Users toggle between modes on the Settings page. The mode is stored in `localStorage` under `autoslides_settings`.
@@ -100,10 +100,10 @@ Rich text markers are supported in any string field: `**bold**`, `_italic_`, `__
 - **Chat area** in the middle (scrollable message log)
 - **Composer** at the bottom (textarea + mode dropdown + send button)
 
-Three modes via dropdown (like Claude's model picker):
-- **Chat** — streaming back-and-forth via `/api/chat-update` (SSE)
-- **New deck** — generate from topic via `/api/generate`
-- **Update** — one-shot edit via `/api/chat-update` (no stream)
+Three modes via dropdown (like Claude's model picker), all routed through `/api/deck`:
+- **Chat** (`mode: "chat"`) — streaming conversation about the deck (SSE), no slide JSON emitted
+- **New deck** (`mode: "new"`) — generate a fresh deck from a topic prompt (SSE)
+- **Update** (`mode: "update"`) — one-shot edit of the existing deck (SSE)
 
 All modes call `onSlidesUpdated` which is the single point of truth for persistence. The panel does NOT write to `localStorage` directly — that's handled by `page.tsx`'s `handleSlidesUpdated`.
 
@@ -111,10 +111,25 @@ All modes call `onSlidesUpdated` which is the single point of truth for persiste
 
 Two providers supported: **Anthropic** (Claude claude-sonnet-4-6) and **OpenAI** (gpt-4o).
 
-- `app/api/generate/route.ts` — POST `{ topic, provider, apiKey? }`. Non-streaming. Returns validated `Slide[]`.
-- `app/api/chat-update/route.ts` — POST `{ instruction, slides, provider, stream, apiKey? }`. Supports SSE streaming (`text/event-stream`) or one-shot JSON response.
+**Single endpoint: `app/api/deck/route.ts`** — POST `{ mode, instruction, slides?, provider, apiKey?, stream?, history? }`.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `mode` | `"chat"` \| `"new"` \| `"update"` | Inferred from `slides` if omitted |
+| `instruction` | string (≤ 4000 chars) | Required |
+| `slides` | `Slide[]` | Required for `update` mode |
+| `stream` | boolean | Defaults to `false`; SSE when `true` |
+| `history` | `ChatMessage[]` | Up to 8 messages of context |
+
+- `mode: "chat"` — plain-text conversational reply; never emits slide JSON
+- `mode: "new"` — generates a fresh deck (6–9 slides, title → end)
+- `mode: "update"` — edits the existing `slides` array per the instruction
+
+All modes support SSE streaming (`text/event-stream`). Streaming events: `{ type: "delta", text }`, `{ type: "done", slides? | reply? }`, `{ type: "error", message }`.
 
 API key resolution: request body → environment variable (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
+
+> **Deprecated** (do not use): `app/api/generate/route.ts`, `app/api/chat-update/route.ts`
 
 ### PPTX export
 
@@ -154,7 +169,7 @@ Endpoint: `https://<your-app>.vercel.app/api/mcp` (`app/api/mcp/route.ts`).
 | Variable | Purpose |
 |----------|---------|
 | `MCP_SECRET` | Bearer token for authentication (timing-safe comparison) |
-| `ANTHROPIC_API_KEY` | For `/api/generate` and `/api/chat-update` |
+| `ANTHROPIC_API_KEY` | For `/api/deck` |
 | `OPENAI_API_KEY` | Alternative provider |
 
 **Step 2 — register in Claude Code:**
@@ -179,3 +194,9 @@ claude mcp add --transport http \
 | `delete_slide` | Remove a slide at an index |
 | `set_typography` | Apply typography to one or all slides |
 | `list_slide_types` | Describe all slide types and their fields |
+
+#### Generating slides in MCP mode
+
+When Claude needs to **create or rewrite a full deck** in MCP mode, call `list_slide_types` to confirm the schema, then compose the slide array directly and pass it to `set_slides`. Do **not** call `/api/generate` or `/api/chat-update` — those routes are deprecated. The canonical AI generation endpoint is `/api/deck` (used by the web UI); in MCP mode Claude generates the JSON itself using the schema from `list_slide_types`.
+
+Every slide **must** include `"theme": "dark"` or `"theme": "light"`. Omitting `theme` is not valid.

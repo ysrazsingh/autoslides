@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // Shared field
-const theme = z.enum(["light", "dark"]).default("dark");
+const theme = z.enum(["light", "dark"]).default("dark").catch("dark");
 
 // ── Typography ───────────────────────────────────────────────────────────────
 // Optional per-slide styling overrides. All fields are optional so existing

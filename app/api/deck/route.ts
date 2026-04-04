@@ -52,15 +52,15 @@ const MODELS = {
 } as const;
 
 const SLIDE_SCHEMA_CATALOG: Record<string, string> = {
-  title: 'title(title, subtitle?, theme, typography?)',
-  content: 'content(title, points[1-6], theme, typography?)',
-  "two-column": 'two-column(title, left.heading?, left.points[], right.heading?, right.points[], theme, typography?)',
-  "three-column": 'three-column(title, columns[3] where each item has heading + body, theme, typography?)',
-  cards: 'cards(title, cards[2-6] where each card has icon?, title, description, theme, typography?)',
-  stats: 'stats(title, stats[2-4] where each stat has value + label, theme, typography?)',
-  quote: 'quote(quote, author?, theme, typography?)',
-  image: 'image(title, imageUrl, caption?, theme, typography?)',
-  end: 'end(title, theme, typography?)',
+  title: 'title(title, subtitle?, theme:"light"|"dark", typography?)',
+  content: 'content(title, points[1-6], theme:"light"|"dark", typography?)',
+  "two-column": 'two-column(title, left.heading?, left.points[], right.heading?, right.points[], theme:"light"|"dark", typography?)',
+  "three-column": 'three-column(title, columns[3] where each item has heading + body, theme:"light"|"dark", typography?)',
+  cards: 'cards(title, cards[2-6] where each card has icon?, title, description, theme:"light"|"dark", typography?)',
+  stats: 'stats(title, stats[2-4] where each stat has value + label, theme:"light"|"dark", typography?)',
+  quote: 'quote(quote, author?, theme:"light"|"dark", typography?)',
+  image: 'image(title, imageUrl, caption?, theme:"light"|"dark", typography?)',
+  end: 'end(title, theme:"light"|"dark", typography?)',
 };
 
 const SLIDE_TYPE_KEYS = Object.keys(SLIDE_SCHEMA_CATALOG) as Array<keyof typeof SLIDE_SCHEMA_CATALOG>;
@@ -200,10 +200,11 @@ function buildDeckSystemPrompt(mode: Mode, history: string, slideSummary: string
     mode === "new"
       ? "Create a fresh deck. Start with title and end with end."
       : "Edit the existing deck. Preserve what is not explicitly asked to change.",
+    'Schema rules: every slide MUST have "theme": "dark" or "theme": "light" (default "dark"). Available types: title, content, two-column, three-column, cards, stats, quote, image, end.',
     history ? `Conversation context:\n${history}` : "",
     slideSummary ? `Current deck summary:\n${slideSummary}` : "",
     existingSlidesJson ? `Current slides JSON:\n${existingSlidesJson}` : "",
-    "Rules: first slide is title, last slide is end, 6-9 slides unless the user asks otherwise, no markdown fences.",
+    'Rules: first slide is title, last slide is end, 6-9 slides unless the user asks otherwise, no markdown fences, "theme" must be exactly "dark" or "light".',
   ];
   return base.filter(Boolean).join("\n\n");
 }
@@ -310,7 +311,7 @@ async function callOpenAIText(args: {
 
   const response = await client.chat.completions.create({
     model: args.model,
-    messages,
+    messages: messages as any,
     max_tokens: args.maxTokens,
     tools: args.tools,
     tool_choice: args.tools ? "auto" : undefined,
@@ -359,10 +360,10 @@ async function* streamOpenAIText(args: {
   const client = new OpenAI({ apiKey: args.apiKey });
   const stream = await client.chat.completions.create({
     model: args.model,
-    messages: args.messages ?? [
+    messages: (args.messages ?? [
       { role: "system", content: args.system },
       { role: "user", content: args.user },
-    ],
+    ]) as any,
     max_tokens: args.maxTokens,
     response_format: args.responseFormat,
     stream: true,
@@ -382,7 +383,7 @@ async function resolveOpenAIToolRound(args: {
   const client = new OpenAI({ apiKey: args.apiKey });
   const response = await client.chat.completions.create({
     model: args.model,
-    messages: args.messages,
+    messages: args.messages as any,
     tools: [SLIDE_SCHEMA_TOOL],
     tool_choice: "auto",
     max_tokens: 400,
