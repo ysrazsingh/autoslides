@@ -98,18 +98,35 @@ Rich text markers are supported in any string field: `**bold**`, `_italic_`, `__
 `components/DeckPanel.tsx` — a sidebar chat interface with:
 - **Header** at top (title + close button)
 - **Chat area** in the middle (scrollable message log)
-- **Composer** at the bottom (textarea + mode dropdown + send button)
+- **Composer** at the bottom (textarea + mode buttons + send button)
 
-Three modes via dropdown (like Claude's model picker), all routed through `/api/deck`:
-- **Chat** (`mode: "chat"`) — streaming conversation about the deck (SSE), no slide JSON emitted
-- **New deck** (`mode: "new"`) — generate a fresh deck from a topic prompt (SSE)
-- **Update** (`mode: "update"`) — one-shot edit of the existing deck (SSE)
+Three modes (buttons in composer), all routed through `/api/deck`:
+- **Chat** (default) — streaming conversation about the deck (SSE), no slide JSON emitted
+- **Create new** (`mode: "new"`) — generate a fresh deck from a topic prompt (SSE + tool calling)
+- **Update existing** (`mode: "update"`) — one-shot edit of the existing deck (SSE + tool calling)
+
+**`ChatLogItem` type:**
+```typescript
+{ role: "user" | "assistant"; text: string; usage?: { inputTokens, outputTokens }; suggestions?: string[] }
+```
+
+**UI features (as of April 2026):**
+- Each message has a **copy button** (hover to reveal, `Copy`/`Check` icons from lucide-react)
+- Assistant messages show **token counts** below the text: `"N in · N out"` at `text-[10px] text-white/25`
+- After deck generation, **suggestion buttons** appear (click fills the draft textarea, no auto-send)
+- **Status indicator** appears during tool calls: pulsing amber dot + italic status text
+- Status clears automatically when real text deltas start flowing
+
+**Key DeckPanel state:**
+- `statusMsg: string | null` — current tool call status to display
+- `streaming: string` — accumulated streaming text (last 6000 chars)
+- The `consumeSSE` function has signature: `(body, onDelta, onStatus, signal?)`
 
 All modes call `onSlidesUpdated` which is the single point of truth for persistence. The panel does NOT write to `localStorage` directly — that's handled by `page.tsx`'s `handleSlidesUpdated`.
 
 ### AI generation
 
-Two providers supported: **Anthropic** (Claude claude-sonnet-4-6) and **OpenAI** (gpt-4o).
+Two providers supported: **Anthropic** (default chat: `claude-haiku-4-5-20251001`, deck: `claude-sonnet-4-6`) and **OpenAI** (chat: `gpt-4o-mini`, deck: `gpt-4o`).
 
 **Single endpoint: `app/api/deck/route.ts`** — POST `{ mode, instruction, slides?, provider, apiKey?, stream?, history? }`.
 
@@ -122,14 +139,55 @@ Two providers supported: **Anthropic** (Claude claude-sonnet-4-6) and **OpenAI**
 | `history` | `ChatMessage[]` | Up to 8 messages of context |
 
 - `mode: "chat"` — plain-text conversational reply; never emits slide JSON
-- `mode: "new"` — generates a fresh deck (6–9 slides, title → end)
-- `mode: "update"` — edits the existing `slides` array per the instruction
+- `mode: "new"` — generates a fresh deck (6–9 slides, title → end) **using tool calling**
+- `mode: "update"` — edits the existing `slides` array per the instruction **using tool calling**
 
-All modes support SSE streaming (`text/event-stream`). Streaming events: `{ type: "delta", text }`, `{ type: "done", slides? | reply? }`, `{ type: "error", message }`.
+#### Tool calling pipeline (new/update modes only)
+
+For `new` and `update`, the AI uses tools to look up schemas before generating JSON. This prevents schema errors and removes the need to embed full JSON examples in the system prompt.
+
+**Tools available to the AI:**
+- `list_slide_types` — returns all 9 type names + 1-line descriptions
+- `get_slide_schema(type)` — returns a complete JSON example + field notes for one type (critical for `two-column`, `three-column`)
+- `get_current_slides` — returns the current deck JSON (for `update` mode)
+
+**Flow:**
+1. Tool calls run non-streaming (up to `MAX_TOOL_ROUNDS = 5`)
+2. Each tool call emits `{ type: "status", message: "..." }` SSE event
+3. Model returns JSON after consulting schemas (usually rounds 2-3)
+4. If model uses all rounds without outputting JSON → one final streaming call with no tools
+5. Parse → repair-on-fail → fallback-on-repair-fail
+
+**SSE event types** (expanded from original):
+```
+{ type: "status", message }          — tool call progress feedback
+{ type: "delta", text }              — streaming text chunks
+{ type: "done", slides?, reply?, usage?: { inputTokens, outputTokens }, suggestions?: string[] }
+{ type: "error", message }
+```
+
+**Token tracking:** accumulated across ALL rounds (tool calls + final generation). Returned in `done` event.
+
+**Suggestions:** hardcoded quick-reply options in `done` event (`SUGGESTIONS_NEW` / `SUGGESTIONS_UPDATE`). No extra API call.
 
 API key resolution: request body → environment variable (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 
 > **Deprecated** (do not use): `app/api/generate/route.ts`, `app/api/chat-update/route.ts`
+
+#### Common generation failure: "only default slides visible"
+
+Usually means the API key is wrong or missing. Steps:
+1. Open Settings → verify provider (OpenAI vs Anthropic) matches the key you have
+2. Check for error message in the DeckPanel — it shows the exact reason
+3. If fallback deck shows ("AI generation encountered an issue"), it means the model returned invalid JSON AND repair failed — try a more specific prompt
+
+#### Schema errors — why they happen and how they're prevented
+
+The most error-prone slide types are `two-column` and `three-column`:
+- `two-column`: `left` and `right` MUST be `{ heading?: string, points: string[] }` — NOT flat arrays
+- `three-column`: `columns` MUST be exactly 3 items of `{ heading: string, body: string }` — NOT arrays of strings
+
+The `get_slide_schema` tool returns these examples with IMPORTANT warning notes, which is how the AI avoids these errors. The `repairDeckWithModel` function also uses the full `SLIDE_EXAMPLES` map in its prompt.
 
 ### PPTX export
 
