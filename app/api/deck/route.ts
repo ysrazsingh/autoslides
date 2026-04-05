@@ -365,7 +365,7 @@ function buildDeckSystemPrompt(mode: Exclude<Mode, "chat">): string {
     "You are a professional presentation slide generator.",
     "You have tools to look up slide types and their exact JSON schemas — use them before generating.",
     mode === "new"
-      ? "Create a fresh deck: 6–9 slides. First slide type must be 'title'. Last slide type must be 'end'."
+      ? "Create a fresh deck with appropriate number of slides. First slide type must be 'title'. Last slide type must be 'end'."
       : "Edit the existing deck. Call get_current_slides first to see what exists. Preserve slides not asked to change.",
     "After consulting schemas with your tools, output a JSON object with a top-level 'slides' array.",
     "Output JSON only — no markdown, no explanation, no code blocks.",
@@ -392,7 +392,7 @@ function buildRepairPrompt(raw: string, existingSlidesJson: string): string {
     "The following slide JSON is invalid or broken. Fix it and return only valid JSON.",
     "Return a JSON object with a top-level 'slides' array. No markdown. No explanation.",
     `Full schema examples for reference:\n${JSON.stringify(SLIDE_EXAMPLES, null, 2)}`,
-    "Rules: every slide needs type + theme. First slide type='title'. Last slide type='end'. 6–9 slides preferred.",
+    "Rules: every slide needs type + theme. First slide type='title'. Last slide type='end'. appropriate number of slides preferred.",
     existingSlidesJson ? `Original slides for reference:\n${existingSlidesJson}` : "",
     `Broken output to fix:\n${raw.slice(0, 8000)}`,
   ]
